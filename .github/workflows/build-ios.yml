@@ -16,15 +16,20 @@ jobs:
           if [ -n "$XCODE_PATH" ]; then
             sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
           fi
-          xcodebuild -version
 
       - name: Install xcodegen
         run: HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
 
-      - name: Setup Rust & iOS Target
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-ios, x86_64-apple-ios
+      - name: Force Install iOS Target to Active Toolchain
+        run: |
+          # Projenin dizinindeki gizli Rust sürümünü zorla tespit et ve indir
+          rustup show
+          ACTIVE_TOOLCHAIN=$(rustup show active-toolchain | awk '{print $1}')
+          echo "Tespit edilen aktif Rust sürümü: $ACTIVE_TOOLCHAIN"
+          
+          # iOS hedeflerini tam olarak bu tespit edilen sürüme kur
+          rustup target add aarch64-apple-ios --toolchain "$ACTIVE_TOOLCHAIN"
+          rustup target add x86_64-apple-ios --toolchain "$ACTIVE_TOOLCHAIN"
 
       - name: Run iOS build script
         run: |
@@ -39,7 +44,6 @@ jobs:
           if ! ls build/*.ipa 1> /dev/null 2>&1 && ! ls *.ipa 1> /dev/null 2>&1; then
             APP_DIR=$(find . -name "*.app" -type d | grep -v "DerivedData" | head -n 1)
             if [ -n "$APP_DIR" ]; then
-              echo "Found app bundle at $APP_DIR, packaging manually..."
               mkdir -p Payload
               cp -r "$APP_DIR" Payload/
               zip -r Muguet.ipa Payload
