@@ -10,23 +10,50 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install xcodegen
-        run: brew install xcodegen
-
-      - name: Install Rust 1.98.1 & iOS Target
+      - name: Select Xcode 16
         run: |
-          rustup toolchain install 1.98.1
-          rustup target add aarch64-apple-ios --toolchain 1.98.1
-          rustup default 1.98.1
+          XCODE_PATH=$(find /Applications -maxdepth 1 -name "Xcode_16*.app" | sort -V | tail -n 1)
+          if [ -n "$XCODE_PATH" ]; then
+            echo "Selected: $XCODE_PATH"
+            sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
+          fi
+          xcodebuild -version
+
+      - name: Install xcodegen
+        run: HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+
+      - name: Ensure iOS Target
+        run: |
+          rustup target add aarch64-apple-ios
 
       - name: Run iOS build script
         run: |
+          export CODE_SIGNING_ALLOWED=NO
+          export CODE_SIGNING_REQUIRED=NO
+          export CODE_SIGN_IDENTITY=""
           chmod +x ./make-ios.sh
           ./make-ios.sh --ipa
 
+      - name: Verify and Package IPA
+        run: |
+          if ! ls build/*.ipa 1> /dev/null 2>&1 && ! ls *.ipa 1> /dev/null 2>&1; then
+            APP_DIR=$(find . -name "*.app" -type d | grep -v "DerivedData" | head -n 1)
+            if [ -n "$APP_DIR" ]; then
+              echo "Found app bundle at $APP_DIR, packaging manually..."
+              mkdir -p Payload
+              cp -r "$APP_DIR" Payload/
+              zip -r Muguet.ipa Payload
+              mkdir -p build
+              mv Muguet.ipa build/
+            fi
+          fi
+
       - name: Upload IPA
         uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: muguet-ios-ipa
-          path: build/*.ipa
+          path: |
+            build/*.ipa
+            ios/build/*.ipa
+            *.ipa
+          if-no-files-found: warn
