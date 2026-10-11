@@ -2,101 +2,51 @@ name: Build iOS IPA
 
 on:
   workflow_dispatch:
+    inputs:
+      bundle_id:
+        description: "Uygulama Bundle ID (benzersiz bir kimlik gir)"
+        required: true
+        default: "com.example.muguet"
+        type: string
 
 jobs:
   build:
     runs-on: macos-15
 
+    permissions:
+      contents: read
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Select Xcode 26
+      - name: Select Xcode 26 or newer
         shell: bash
         run: |
           set -e
 
-          XCODE_PATH=$(find /Applications -maxdepth 1 -type d -name "Xcode_26*.app" | sort -V | tail -n 1)
+          XCODE_PATH=$(find /Applications -maxdepth 1 -type d \
+            \( -name "Xcode_26*.app" -o -name "Xcode_27*.app" \) \
+            | sort -V | tail -n 1)
 
-          if [ -z "$XCODE_PATH" ]; then
-            echo "Xcode 26 bulunamadı!"
-            ls -la /Applications | grep Xcode || true
-            exit 1
+          if [ -n "$XCODE_PATH" ]; then
+            sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
           fi
-
-          echo "Using: $XCODE_PATH"
-
-          sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
 
           xcode-select -p
           xcodebuild -version
-          xcrun --sdk iphoneos --show-sdk-version
+
+          XCODE_VERSION=$(xcodebuild -version | awk '/^Xcode / {print $2; exit}')
+          XCODE_MAJOR=${XCODE_VERSION%%.*}
+
+          if [ "$XCODE_MAJOR" -lt 26 ]; then
+            echo "HATA: Xcode 26 veya üstü gerekiyor."
+            exit 1
+          fi
 
       - name: Install xcodegen
-        run: |
-          HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
-
-      - name: Install Rust 1.98.1
         shell: bash
         run: |
           set -e
 
-          rustup toolchain install 1.98.1 --profile minimal
-
-          # Muguet make-ios.sh bunu özellikle kullanıyor
-          rustup target add aarch64-apple-ios --toolchain 1.98.1
-
-          # Proje için Rust 1.98.1'i seç
-          rustup override set 1.98.1
-
-          echo "Rust version:"
-          rustc --version
-
-          echo "Cargo version:"
-          cargo --version
-
-          echo "Installed iOS targets:"
-          rustup target list --installed --toolchain 1.98.1
-
-      - name: Verify Rust iOS target
-        shell: bash
-        run: |
-          set -e
-
-          rustc +1.98.1 --version
-          cargo +1.98.1 --version
-
-          rustup target list --installed --toolchain 1.98.1 | grep "aarch64-apple-ios (installed)"
-
-      - name: Build iOS IPA
-        shell: bash
-        run: |
-          set -e
-
-          chmod +x ./make-ios.sh
-
-          export CODE_SIGNING_ALLOWED=NO
-          export CODE_SIGNING_REQUIRED=NO
-          export CODE_SIGN_IDENTITY=""
-
-          ./make-ios.sh --ipa
-
-      - name: Check IPA
-        shell: bash
-        run: |
-          set -e
-
-          echo "Generated files:"
-          find . -name "*.ipa" -o -name "*.app"
-
-          test -f build/Muguet.ipa
-
-          echo "IPA found:"
-          ls -lh build/Muguet.ipa
-
-      - name: Upload IPA
-        uses: actions/upload-artifact@v4
-        with:
-          name: Muguet-iOS-IPA
-          path: build/Muguet.ipa
-          if-no-files-found: error
+          if ! command -v xcodegen >/dev/null 
